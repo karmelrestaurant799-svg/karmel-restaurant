@@ -83,6 +83,10 @@ export async function GET() {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const reservations = await prisma.reservation.findMany({ orderBy: { date: "asc" } });
+  const reservations = await prisma.reservation.findMany({
+    where: { date: { gte: new Date(new Date().toDateString()) } },
+    orderBy: { date: "asc" },
+    take: 500,
+  });
   return NextResponse.json({ reservations });
 }

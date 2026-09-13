@@ -109,6 +109,12 @@ model Reservation {
   // Prevents two reservations on the SAME table at the SAME date+time.
   // Different tables at the same time slot are unaffected.
   @@unique([date, time, tableNumber])
+  // Every admin/API query filters or sorts by these — without indexes each
+  // one is a full table scan that gets slower as reservations pile up.
+  @@index([date])
+  @@index([date, status])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model MenuCategory {

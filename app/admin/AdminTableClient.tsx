@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useMemo, useState, memo } from "react";
 import { useLanguage } from "@/lib/languageContext";
 
 type Reservation = {
@@ -17,6 +17,111 @@ type Reservation = {
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Hoisted out of the parent component so these don't get redefined (and every
+// row remounted) on every keystroke/state change in the table above.
+const StatusSelect = memo(function StatusSelect({
+  value,
+  onChange,
+  disabled,
+  labels,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  labels: Record<string, string>;
+}) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-[#0a0a0a] border border-stone-600 text-xs p-1 w-full">
+      <option value="PENDING">{labels.PENDING}</option>
+      <option value="CONFIRMED">{labels.CONFIRMED}</option>
+      <option value="CHANGE_REQUESTED">{labels.CHANGE_REQUESTED}</option>
+      <option value="CANCELLED">{labels.CANCELLED}</option>
+    </select>
+  );
+});
+
+const ProposeTimeInput = memo(function ProposeTimeInput({
+  value,
+  onChange,
+  onSend,
+  onCancel,
+  disabled,
+  sendLabel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  onCancel: () => void;
+  disabled?: boolean;
+  sendLabel: string;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row gap-2">
+      <input type="time" step={300} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-[#0a0a0a] border border-stone-600 text-xs p-2 w-full sm:w-auto" />
+      <button onClick={onSend} disabled={disabled} className="text-amber-500 text-xs font-medium py-1 px-2">{sendLabel}</button>
+      <button onClick={onCancel} className="text-stone-500 text-xs font-medium py-1 px-2">✕</button>
+    </div>
+  );
+});
+
+const ReservationCard = memo(function ReservationCard({
+  r,
+  isProposing,
+  proposedTime,
+  setProposedTime,
+  setProposingId,
+  sendChangeRequest,
+  update,
+  remove,
+  statusLabels,
+  labels,
+  formatDate,
+}: {
+  r: Reservation;
+  isProposing: boolean;
+  proposedTime: string;
+  setProposedTime: (v: string) => void;
+  setProposingId: (v: string | null) => void;
+  sendChangeRequest: (r: Reservation) => void;
+  update: (id: string, patch: Record<string, unknown>) => void;
+  remove: (id: string) => void;
+  statusLabels: Record<string, string>;
+  labels: { guests: string; tableNumber: string; email: string; phone: string; proposeNewTime: string; delete: string };
+  formatDate: (dateStr: string) => string;
+}) {
+  return (
+    <div className="border border-white/10 rounded-lg p-4 bg-white/5 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-medium">{r.name}</span>
+        <span className="text-xs text-stone-500">{formatDate(r.date)} • {r.time}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-stone-400">
+        <div><span className="font-medium text-stone-300">{labels.guests}:</span> {r.partySize}</div>
+        <div><span className="font-medium text-stone-300">{labels.tableNumber}:</span> {r.tableNumber ?? "—"}</div>
+        <div className="col-span-2"><span className="font-medium text-stone-300">{labels.email}:</span> {r.email}</div>
+        <div className="col-span-2"><span className="font-medium text-stone-300">{labels.phone}:</span> {r.phone}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <StatusSelect value={r.status} onChange={(v) => update(r.id, { status: v })} labels={statusLabels} />
+      </div>
+      <div className="flex items-center gap-2">
+        {isProposing ? (
+          <ProposeTimeInput
+            value={proposedTime}
+            onChange={setProposedTime}
+            onSend={() => sendChangeRequest(r)}
+            onCancel={() => setProposingId(null)}
+            sendLabel={labels.proposeNewTime}
+          />
+        ) : (
+          <button onClick={() => setProposingId(r.id)} className="text-amber-500 text-xs font-medium">{labels.proposeNewTime}</button>
+        )}
+        <button onClick={() => remove(r.id)} className="text-red-400 hover:text-red-300 text-xs font-medium ml-auto">{labels.delete}</button>
+      </div>
+    </div>
+  );
+});
+
 export default function AdminTable({ initial = [] }: { initial?: Reservation[] }) {
   const { t } = useLanguage();
   const [rows, setRows] = useState<Reservation[]>(initial);
@@ -24,124 +129,91 @@ export default function AdminTable({ initial = [] }: { initial?: Reservation[] }
   const [proposingId, setProposingId] = useState<string | null>(null);
   const [proposedTime, setProposedTime] = useState("");
 
-  async function update(id: string, patch: Record<string, unknown>) {
-    const previous = rows.find((r) => r.id === id);
-    if (patch.status || patch.tableNumber !== undefined) {
-      setRows((r) => r.map((x) => (x.id === id ? { ...x, ...(patch as Partial<Reservation>) } : x)));
-    }
-    setError("");
+  const update = useCallback(
+    async (id: string, patch: Record<string, unknown>) => {
+      let previous: Reservation | undefined;
+      setRows((r) => {
+        previous = r.find((x) => x.id === id);
+        if (patch.status || patch.tableNumber !== undefined) {
+          return r.map((x) => (x.id === id ? { ...x, ...(patch as Partial<Reservation>) } : x));
+        }
+        return r;
+      });
+      setError("");
 
-    const res = await fetch(`/api/reservations/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
+      const res = await fetch(`/api/reservations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
 
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      setError(json.error || t.admin.error || "Update failed.");
-      if (previous) setRows((r) => r.map((x) => (x.id === id ? previous : x)));
-    }
-    return res.ok;
-  }
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json.error || t.admin.error || "Update failed.");
+        if (previous) {
+          const prev = previous;
+          setRows((r) => r.map((x) => (x.id === id ? prev : x)));
+        }
+      }
+      return res.ok;
+    },
+    [t.admin.error]
+  );
 
-  async function remove(id: string) {
+  const remove = useCallback(async (id: string) => {
     if (!confirm(t.admin.deleteCategoryConfirm || "Delete this reservation?")) return;
     setRows((r) => r.filter((x) => x.id !== id));
     await fetch(`/api/reservations/${id}`, { method: "DELETE" });
-  }
+  }, [t.admin.deleteCategoryConfirm]);
 
-  async function sendChangeRequest(r: Reservation) {
-    if (!proposedTime) return;
-    const [h, m] = proposedTime.split(":").map(Number);
-    const requestedTime = new Date(r.date);
-    requestedTime.setHours(h, m, 0, 0);
+  const sendChangeRequest = useCallback(
+    async (r: Reservation) => {
+      if (!proposedTime) return;
+      const [h, m] = proposedTime.split(":").map(Number);
+      const requestedTime = new Date(r.date);
+      requestedTime.setHours(h, m, 0, 0);
 
-    const ok = await update(r.id, { status: "CHANGE_REQUESTED", requestedTime: requestedTime.toISOString() });
-    if (ok) {
-      setRows((rows) => rows.map((x) => (x.id === r.id ? { ...x, status: "CHANGE_REQUESTED" } : x)));
-      setProposingId(null);
-      setProposedTime("");
-    }
-  }
+      const ok = await update(r.id, { status: "CHANGE_REQUESTED", requestedTime: requestedTime.toISOString() });
+      if (ok) {
+        setRows((rows) => rows.map((x) => (x.id === r.id ? { ...x, status: "CHANGE_REQUESTED" } : x)));
+        setProposingId(null);
+        setProposedTime("");
+      }
+    },
+    [proposedTime, update]
+  );
 
-  const statusLabels: Record<string, string> = {
-    PENDING: t.admin.pending,
-    CONFIRMED: t.admin.confirmed,
-    CHANGE_REQUESTED: t.admin.changeRequested,
-    CANCELLED: t.admin.cancelled,
-  };
+  const statusLabels: Record<string, string> = useMemo(
+    () => ({
+      PENDING: t.admin.pending,
+      CONFIRMED: t.admin.confirmed,
+      CHANGE_REQUESTED: t.admin.changeRequested,
+      CANCELLED: t.admin.cancelled,
+    }),
+    [t.admin.pending, t.admin.confirmed, t.admin.changeRequested, t.admin.cancelled]
+  );
+
+  const cardLabels = useMemo(
+    () => ({
+      guests: t.admin.guests,
+      tableNumber: t.admin.tableNumber,
+      email: t.admin.email,
+      phone: t.admin.phone,
+      proposeNewTime: t.admin.proposeNewTime,
+      delete: t.admin.delete,
+    }),
+    [t.admin.guests, t.admin.tableNumber, t.admin.email, t.admin.phone, t.admin.proposeNewTime, t.admin.delete]
+  );
 
   const dayNames = t.common?.dayNames || DAY_NAMES;
 
-  function formatDate(dateStr: string) {
-    const d = new Date(dateStr);
-    return `${dayNames[d.getDay()]}, ${d.toLocaleDateString("en-GB")}`;
-  }
-
-  function StatusSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
-    return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-[#0a0a0a] border border-stone-600 text-xs p-1 w-full">
-        <option value="PENDING">{statusLabels.PENDING}</option>
-        <option value="CONFIRMED">{statusLabels.CONFIRMED}</option>
-        <option value="CHANGE_REQUESTED">{statusLabels.CHANGE_REQUESTED}</option>
-        <option value="CANCELLED">{statusLabels.CANCELLED}</option>
-      </select>
-    );
-  }
-
-  function ProposeTimeInput({ value, onChange, onSend, onCancel, disabled }: { value: string; onChange: (v: string) => void; onSend: () => void; onCancel: () => void; disabled?: boolean }) {
-    return (
-      <div className="flex flex-col sm:flex-row gap-2">
-        <input type="time" step={300} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-[#0a0a0a] border border-stone-600 text-xs p-2 w-full sm:w-auto" />
-        <button onClick={onSend} disabled={disabled} className="text-amber-500 text-xs font-medium py-1 px-2">{t.admin.send}</button>
-        <button onClick={onCancel} className="text-stone-500 text-xs font-medium py-1 px-2">✕</button>
-      </div>
-    );
-  }
-
-  function ReservationCard({ r, proposingId, proposedTime, setProposedTime, setProposingId, sendChangeRequest, update, remove }: { 
-    r: Reservation; 
-    proposingId: string | null; 
-    proposedTime: string;
-    setProposedTime: (v: string) => void;
-    setProposingId: (v: string | null) => void;
-    sendChangeRequest: (r: Reservation) => void;
-    update: (id: string, patch: Record<string, unknown>) => void;
-    remove: (id: string) => void;
-  }) {
-    const isProposing = proposingId === r.id;
-    return (
-      <div key={r.id} className="border border-white/10 rounded-lg p-4 bg-white/5 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="font-medium">{r.name}</span>
-          <span className="text-xs text-stone-500">{formatDate(r.date)} • {r.time}</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs text-stone-400">
-          <div><span className="font-medium text-stone-300">{t.admin.guests}:</span> {r.partySize}</div>
-          <div><span className="font-medium text-stone-300">{t.admin.tableNumber}:</span> {r.tableNumber ?? "—"}</div>
-          <div className="col-span-2"><span className="font-medium text-stone-300">{t.admin.email}:</span> {r.email}</div>
-          <div className="col-span-2"><span className="font-medium text-stone-300">{t.admin.phone}:</span> {r.phone}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusSelect value={r.status} onChange={(v) => update(r.id, { status: v })} />
-        </div>
-        <div className="flex items-center gap-2">
-          {isProposing ? (
-            <ProposeTimeInput 
-              value={proposedTime} 
-              onChange={setProposedTime} 
-              onSend={() => sendChangeRequest(r)} 
-              onCancel={() => setProposingId(null)} 
-            />
-          ) : (
-            <button onClick={() => setProposingId(r.id)} className="text-amber-500 text-xs font-medium">{t.admin.proposeNewTime}</button>
-          )}
-          <button onClick={() => remove(r.id)} className="text-red-400 hover:text-red-300 text-xs font-medium ml-auto">{t.admin.delete}</button>
-        </div>
-      </div>
-    );
-  }
+  const formatDate = useCallback(
+    (dateStr: string) => {
+      const d = new Date(dateStr);
+      return `${dayNames[d.getDay()]}, ${d.toLocaleDateString("en-GB")}`;
+    },
+    [dayNames]
+  );
 
   return (
     <div>
@@ -156,13 +228,16 @@ export default function AdminTable({ initial = [] }: { initial?: Reservation[] }
           <ReservationCard
             key={r.id}
             r={r}
-            proposingId={proposingId}
+            isProposing={proposingId === r.id}
             proposedTime={proposedTime}
             setProposedTime={setProposedTime}
             setProposingId={setProposingId}
             sendChangeRequest={sendChangeRequest}
             update={update}
             remove={remove}
+            statusLabels={statusLabels}
+            labels={cardLabels}
+            formatDate={formatDate}
           />
         ))}
         {rows.length === 0 && (

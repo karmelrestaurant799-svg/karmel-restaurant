@@ -3,8 +3,10 @@ import AdminTableClient from "./AdminTableClient";
 
 export default async function AdminPage() {
   const reservations = await prisma.reservation.findMany({
+    where: { date: { gte: new Date(new Date().toDateString()) } },
     orderBy: { date: "asc" },
     include: { user: { select: { name: true, email: true } } },
+    take: 500,
   });
 
   const formatted = reservations.map((r) => ({

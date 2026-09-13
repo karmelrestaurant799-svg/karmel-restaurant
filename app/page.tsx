@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useScroll, useTransform, Variants } from "framer-motion";
@@ -29,10 +29,15 @@ export default function Home() {
   const { t } = useLanguage();
   const { scrollY } = useScroll();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileOpenRef = useRef(mobileOpen);
   const [navVisible, setNavVisible] = useState(true);
   const [pastHero, setPastHero] = useState(false);
-  const [lastScrollY, setLastScrollY] = useState(0);
   const [activeSection, setActiveSection] = useState("");
+
+  useEffect(() => {
+    mobileOpenRef.current = mobileOpen;
+    if (mobileOpen) setNavVisible(true);
+  }, [mobileOpen]);
 
   const heroBgY = useTransform(scrollY, [0, 1000], ["0%", "30%"]);
   const heroTextY = useTransform(scrollY, [0, 600], ["0%", "50%"]);
@@ -40,33 +45,79 @@ export default function Home() {
 
   const { data: session } = useSession();
 
-  // Auto-hide navbar: visible on hero, hide when scrolling down past hero,
-  // show again on scroll up or when mouse is near the top (desktop).
+  // Auto-hide navbar + scroll-spy, combined into a single rAF-throttled scroll
+  // handler so we only do one layout read per frame instead of two separate
+  // scroll listeners fighting for the same paint.
   useEffect(() => {
-    const heroThreshold = typeof window !== "undefined" ? window.innerHeight * 0.7 : 500;
+    const sectionIds = ["experience", "menu", "reservations", "location"];
+    const heroThreshold = window.innerHeight * 0.7;
+    let ticking = false;
+    let prevY = window.scrollY;
 
-    const onScroll = () => {
+    const measure = () => {
+      ticking = false;
       const y = window.scrollY;
-      const goingDown = y > lastScrollY;
+      const goingDown = y > prevY;
       const atTop = y < 40;
       const beyondHero = y > heroThreshold;
 
       setPastHero(beyondHero);
 
-      if (atTop || mobileOpen) {
-        setNavVisible(true);
-      } else if (beyondHero && goingDown && y - lastScrollY > 4) {
-        setNavVisible(false);
-      } else if (!goingDown && lastScrollY - y > 4) {
-        setNavVisible(true);
+      setNavVisible((prevVisible) => {
+        if (atTop || mobileOpenRef.current) return true;
+        if (beyondHero && goingDown && y - prevY > 4) return false;
+        if (!goingDown && prevY - y > 4) return true;
+        return prevVisible;
+      });
+
+      // Scroll-spy: section whose band contains the viewport midpoint
+      const mid = y + window.innerHeight * 0.35;
+      let current = "";
+      for (const id of sectionIds) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const top = el.offsetTop;
+        if (mid >= top && mid < top + el.offsetHeight) {
+          current = id;
+          break;
+        }
+      }
+      if (!current) {
+        for (const id of sectionIds) {
+          const el = document.getElementById(id);
+          if (el && el.offsetTop <= mid) current = id;
+        }
+      }
+      if (y < window.innerHeight * 0.45) current = "";
+
+      setActiveSection((prev) => (prev === current ? prev : current));
+      const desired = current ? `#${current}` : "";
+      if (window.location.hash !== desired) {
+        window.history.replaceState(
+          null,
+          "",
+          current ? `#${current}` : window.location.pathname + window.location.search
+        );
       }
 
-      setLastScrollY(y);
+      prevY = y;
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [lastScrollY, mobileOpen]);
+    const onScrollOrResize = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(measure);
+      }
+    };
+
+    measure();
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onScrollOrResize, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, []);
 
   // Desktop: reveal nav when pointer approaches the top edge
   useEffect(() => {
@@ -75,61 +126,6 @@ export default function Home() {
     };
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
-  }, []);
-
-
-  // Scroll-spy: pick the section whose top is closest above the midpoint of the viewport
-  useEffect(() => {
-    const sectionIds = ["experience", "menu", "reservations", "location"];
-
-    const updateActive = () => {
-      const mid = window.scrollY + window.innerHeight * 0.35;
-      let current = "";
-
-      for (const id of sectionIds) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        const top = el.offsetTop;
-        const bottom = top + el.offsetHeight;
-        if (mid >= top && mid < bottom) {
-          current = id;
-          break;
-        }
-      }
-
-      // Fallback: last section whose top is above midpoint
-      if (!current) {
-        for (const id of sectionIds) {
-          const el = document.getElementById(id);
-          if (!el) continue;
-          if (el.offsetTop <= mid) current = id;
-        }
-      }
-
-      // Still in hero
-      if (window.scrollY < window.innerHeight * 0.45) {
-        current = "";
-      }
-
-      setActiveSection((prev) => (prev === current ? prev : current));
-
-      const desired = current ? `#${current}` : "";
-      if (window.location.hash !== desired) {
-        if (current) {
-          window.history.replaceState(null, "", `#${current}`);
-        } else {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        }
-      }
-    };
-
-    updateActive();
-    window.addEventListener("scroll", updateActive, { passive: true });
-    window.addEventListener("resize", updateActive, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", updateActive);
-      window.removeEventListener("resize", updateActive);
-    };
   }, []);
 
   const fadeInUp: Variants = {
@@ -272,7 +268,7 @@ export default function Home() {
         </div>
 
         {/* Center: Nav links */}
-        <div className="w-1/3 hidden md:flex justify-center gap-10 lg:gap-14 text-[10px] sm:text-[11px] tracking-[0.3em] sm:tracking-[0.35em] uppercase font-medium">
+        <div className="w-1/3 flex justify-center gap-10 lg:gap-14 text-[10px] sm:text-[11px] tracking-[0.3em] sm:tracking-[0.35em] uppercase font-medium invisible md:visible">
           {navLinks}
         </div>
 
@@ -297,8 +293,10 @@ export default function Home() {
           >
             <span className="hidden sm:block">{t.nav.reservations}</span>
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-amber-500/30 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-black transition-all duration-300 text-sm">
-              <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h16v16H4z M8 8h8 M8 12h8 M8 16h8 M12 4v16" />
+              {/* Cocktail glass — on-theme for the bar's reservations CTA */}
+              <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 4.5h14M5 4.5 12 13m7-8.5L12 13m0 0v5.5M8.5 18.5h7" />
+                <circle cx="15.5" cy="7" r="0.9" fill="currentColor" stroke="none" />
               </svg>
             </div>
           </Link>
@@ -308,21 +306,23 @@ export default function Home() {
             type="button"
             aria-label="Toggle menu"
             onClick={() => setMobileOpen((v) => !v)}
-            className="md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5 border border-stone-700 rounded-full ml-2"
+            className={`md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5 border rounded-full ml-2 transition-colors duration-300 ${
+              mobileOpen ? "border-amber-500 bg-amber-500/10" : "border-stone-700"
+            }`}
           >
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "rotate-45 translate-y-1" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 rotate-45 translate-y-1 bg-amber-500" : "w-4"
               }`}
             />
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "opacity-0" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 opacity-0" : "w-2.5"
               }`}
             />
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "-rotate-45 -translate-y-1" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 -rotate-45 -translate-y-1 bg-amber-500" : "w-4"
               }`}
             />
           </button>
