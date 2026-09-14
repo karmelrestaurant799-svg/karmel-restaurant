@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { format, addDays, startOfWeek, endOfWeek, isSameDay, isToday, parseISO } from "date-fns";
 import { useLanguage } from "@/lib/languageContext";
@@ -28,6 +28,10 @@ const STATUS_COLORS = {
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const FULL_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Minimum horizontal drag (px) before a touch gesture counts as a swipe
+// rather than an accidental scroll wobble.
+const SWIPE_THRESHOLD = 50;
+
 export default function CalendarView({
   initialReservations,
   viewDate: initialViewDate,
@@ -40,6 +44,8 @@ export default function CalendarView({
   const [reservations, setReservations] = useState(initialReservations);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [dayReservations, setDayReservations] = useState<Reservation[]>([]);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  const touchStartX = useRef<number | null>(null);
 
   const weekStart = startOfWeek(viewDate, { weekStartsOn: 0 });
   const weekEnd = endOfWeek(viewDate, { weekStartsOn: 0 });
@@ -49,9 +55,42 @@ export default function CalendarView({
   const getDayReservations = (day: Date) =>
     reservations.filter((r) => isSameDay(parseISO(r.date), day));
 
+  const goToPreviousWeek = () => setViewDate((d) => addDays(d, -7));
+  const goToNextWeek = () => setViewDate((d) => addDays(d, 7));
+  const goToToday = () => setViewDate(new Date());
+
   const handleDayClick = (day: Date) => {
     setSelectedDay(day);
     setDayReservations(getDayReservations(day));
+    // Give the detail panel a moment to render, then bring it into view —
+    // most useful on mobile where it appears below the fold.
+    requestAnimationFrame(() => {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  };
+
+  // Keyboard navigation: arrows page the week, Escape clears the selection.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
+      if (e.key === "ArrowLeft") goToPreviousWeek();
+      else if (e.key === "ArrowRight") goToNextWeek();
+      else if (e.key === "Escape") setSelectedDay(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    if (delta > SWIPE_THRESHOLD) goToPreviousWeek();
+    else if (delta < -SWIPE_THRESHOLD) goToNextWeek();
+    touchStartX.current = null;
   };
 
   const handleReservationUpdate = async (id: string, patch: Partial<Reservation>) => {
@@ -82,101 +121,178 @@ export default function CalendarView({
     CANCELLED: t.admin.cancelled,
   };
 
+  const weekSummary = useMemo(() => {
+    const inWeek = reservations.filter((r) => {
+      const d = parseISO(r.date);
+      return d >= weekStart && d <= weekEnd;
+    });
+    return {
+      total: inWeek.length,
+      confirmed: inWeek.filter((r) => r.status === "CONFIRMED").length,
+      pending: inWeek.filter((r) => r.status === "PENDING").length,
+    };
+  }, [reservations, weekStart, weekEnd]);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-4xl text-white">{t.admin.calendar}</h1>
-          <p className="text-stone-400 mt-1">
-            {t.admin.weekOf} {format(weekStart, "MMMM d, yyyy")} – {format(weekEnd, "MMMM d, yyyy")}
+          <h1 className="text-3xl sm:text-4xl text-white">{t.admin.calendar}</h1>
+          <p className="text-stone-400 mt-1 text-sm sm:text-base">
+            {t.admin.weekOf} {format(weekStart, "MMM d")} – {format(weekEnd, "MMM d, yyyy")}
           </p>
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <span className="text-stone-500">{weekSummary.total} this week</span>
+            {weekSummary.confirmed > 0 && (
+              <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">
+                {weekSummary.confirmed} {t.admin.confirmed}
+              </span>
+            )}
+            {weekSummary.pending > 0 && (
+              <span className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded">
+                {weekSummary.pending} {t.admin.pending}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
-            onClick={() => setViewDate(addDays(viewDate, -7))}
-            className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-sm rounded-lg transition-colors"
+            onClick={goToPreviousWeek}
+            aria-label="Previous week"
+            className="px-3 sm:px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-sm rounded-lg transition-colors"
           >
             {t.admin.previous}
           </button>
           <button
-            onClick={() => setViewDate(new Date())}
-            className="px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 text-sm rounded-lg transition-colors"
+            onClick={goToToday}
+            className="px-3 sm:px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 text-sm rounded-lg transition-colors"
           >
             {t.admin.today}
           </button>
           <button
-            onClick={() => setViewDate(addDays(viewDate, 7))}
-            className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-sm rounded-lg transition-colors"
+            onClick={goToNextWeek}
+            aria-label="Next week"
+            className="px-3 sm:px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-sm rounded-lg transition-colors"
           >
             {t.admin.next}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
-        {days.map((day) => {
-          const dayReservations = getDayReservations(day);
-          const confirmedCount = dayReservations.filter((r) => r.status === "CONFIRMED").length;
-          const pendingCount = dayReservations.filter((r) => r.status === "PENDING").length;
-          const isCurrentMonth = day.getMonth() === viewDate.getMonth();
-          const isSelected = selectedDay && isSameDay(day, selectedDay);
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        {/* Desktop / tablet: full 7-column week grid */}
+        <div className="hidden sm:grid grid-cols-7 gap-1">
+          {days.map((day) => {
+            const dReservations = getDayReservations(day);
+            const confirmedCount = dReservations.filter((r) => r.status === "CONFIRMED").length;
+            const pendingCount = dReservations.filter((r) => r.status === "PENDING").length;
+            const isCurrentMonth = day.getMonth() === viewDate.getMonth();
+            const isSelected = selectedDay && isSameDay(day, selectedDay);
 
-          return (
-            <button
-              key={day.toISOString()}
-              onClick={() => handleDayClick(day)}
-              className={`relative h-32 p-3 text-left transition-colors ${
-                isSelected
-                  ? "bg-amber-500/10 border-2 border-amber-500"
-                  : "bg-white/5 border border-white/10 hover:bg-white/10"
-              } ${!isCurrentMonth ? "opacity-40" : ""} ${isToday(day) ? "ring-2 ring-amber-500/50" : ""}`}
-              style={{ minHeight: "120px" }}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className={`text-sm font-medium ${isToday(day) ? "text-amber-400" : "text-white"}`}>
-                  {format(day, "d")}
-                </span>
-                <span className="text-xs text-stone-500">{DAY_NAMES[day.getDay()]}</span>
-              </div>
-              <div className="space-y-1 max-h-[70px] overflow-hidden">
-                {dayReservations.slice(0, 3).map((r) => (
-                  <div
-                    key={r.id}
-                    className={`text-xs px-2 py-1 rounded truncate ${STATUS_COLORS[r.status]}`}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {r.time} – {r.name} {r.tableNumber !== null && `(T${r.tableNumber})`}
-                  </div>
-                ))}
-                {dayReservations.length > 3 && (
-                  <div className="text-xs text-stone-500 truncate">
-                    +{dayReservations.length - 3} more
-                  </div>
-                )}
-              </div>
-              {(confirmedCount > 0 || pendingCount > 0) && (
-                <div className="absolute bottom-2 right-2 flex gap-1">
-                  {confirmedCount > 0 && (
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">
-                      {confirmedCount}{t.admin.confirmedCount?.charAt(0) || "C"}
-                    </span>
-                  )}
-                  {pendingCount > 0 && (
-                    <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
-                      {pendingCount}{t.admin.pendingCount?.charAt(0) || "P"}
-                    </span>
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => handleDayClick(day)}
+                className={`relative min-h-32 p-3 text-left transition-colors ${
+                  isSelected
+                    ? "bg-amber-500/10 border-2 border-amber-500"
+                    : "bg-white/5 border border-white/10 hover:bg-white/10"
+                } ${!isCurrentMonth ? "opacity-40" : ""} ${isToday(day) ? "ring-2 ring-amber-500/50" : ""}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className={`text-sm font-medium ${isToday(day) ? "text-amber-400" : "text-white"}`}>
+                    {format(day, "d")}
+                  </span>
+                  <span className="text-xs text-stone-500">{DAY_NAMES[day.getDay()]}</span>
+                </div>
+                <div className="space-y-1 max-h-[70px] overflow-hidden">
+                  {dReservations.slice(0, 3).map((r) => (
+                    <div key={r.id} className={`text-xs px-2 py-1 rounded truncate ${STATUS_COLORS[r.status]}`}>
+                      {r.time} – {r.name} {r.tableNumber !== null && `(T${r.tableNumber})`}
+                    </div>
+                  ))}
+                  {dReservations.length > 3 && (
+                    <div className="text-xs text-stone-500 truncate">+{dReservations.length - 3} more</div>
                   )}
                 </div>
-              )}
-            </button>
-          );
-        })}
+                {(confirmedCount > 0 || pendingCount > 0) && (
+                  <div className="absolute bottom-2 right-2 flex gap-1">
+                    {confirmedCount > 0 && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">
+                        {confirmedCount}{t.admin.confirmedCount?.charAt(0) || "C"}
+                      </span>
+                    )}
+                    {pendingCount > 0 && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                        {pendingCount}{t.admin.pendingCount?.charAt(0) || "P"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Mobile: a swipeable vertical agenda — the 7-column grid becomes
+            unreadably narrow below ~640px, so each day gets a full-width row. */}
+        <div className="sm:hidden flex flex-col gap-2">
+          {days.map((day) => {
+            const dReservations = getDayReservations(day);
+            const confirmedCount = dReservations.filter((r) => r.status === "CONFIRMED").length;
+            const pendingCount = dReservations.filter((r) => r.status === "PENDING").length;
+            const isSelected = selectedDay && isSameDay(day, selectedDay);
+
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => handleDayClick(day)}
+                className={`w-full text-left p-4 rounded-lg transition-colors ${
+                  isSelected
+                    ? "bg-amber-500/10 border-2 border-amber-500"
+                    : "bg-white/5 border border-white/10 active:bg-white/10"
+                } ${isToday(day) ? "ring-2 ring-amber-500/50" : ""}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-lg font-medium ${isToday(day) ? "text-amber-400" : "text-white"}`}>
+                      {format(day, "d")}
+                    </span>
+                    <span className="text-xs text-stone-500 uppercase tracking-wide">{FULL_DAY_NAMES[day.getDay()]}</span>
+                    {isToday(day) && <span className="text-[10px] text-amber-400 uppercase tracking-wide">{t.admin.today}</span>}
+                  </div>
+                  <div className="flex gap-1">
+                    {confirmedCount > 0 && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">
+                        {confirmedCount}{t.admin.confirmedCount?.charAt(0) || "C"}
+                      </span>
+                    )}
+                    {pendingCount > 0 && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                        {pendingCount}{t.admin.pendingCount?.charAt(0) || "P"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-stone-500 mt-1.5">
+                  {dReservations.length === 0
+                    ? t.admin.noReservationsThisDay
+                    : dReservations
+                        .slice(0, 2)
+                        .map((r) => `${r.time} ${r.name}`)
+                        .join(" · ") + (dReservations.length > 2 ? ` +${dReservations.length - 2}` : "")}
+                </p>
+              </button>
+            );
+          })}
+          <p className="text-center text-stone-600 text-[11px] pt-1">← swipe to change week →</p>
+        </div>
       </div>
 
       {selectedDay && (
-        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+        <div ref={detailRef} className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 scroll-mt-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl text-white">
+            <h2 className="text-lg sm:text-xl text-white">
               {FULL_DAY_NAMES[selectedDay.getDay()]}, {format(selectedDay, "MMMM d, yyyy")}
             </h2>
             <button
