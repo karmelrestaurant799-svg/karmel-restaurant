@@ -8,25 +8,27 @@ import { sendMail, otpEmailHtml } from "@/lib/mailer";
 import { generateOtp, otpExpiry } from "@/lib/otp";
 import { rateLimit } from "@/lib/rateLimit";
 import { sha256 } from "@/lib/hash";
+import { readJson, clientIp } from "@/lib/http";
 
+// Upper bounds are generous; they only stop abusive payloads (multi-MB names,
+// bcrypt-hashing a huge password) from being stored or processed.
 const schema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  phone: z.string().min(6),
-  password: z.string().min(8),
+  name: z.string().min(2).max(100),
+  email: z.string().email().max(254),
+  phone: z.string().min(6).max(32),
+  password: z.string().min(8).max(200),
   consent: z.boolean().refine((v) => v === true, {
     message: "You must accept the privacy policy to register.",
   }),
 });
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get("x-forwarded-for") ?? "unknown";
-  const limited = await rateLimit("register", ip);
+  const limited = await rateLimit("register", clientIp(req));
   if (!limited.success) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }
 
-  const body = await req.json();
+  const body = await readJson(req);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });

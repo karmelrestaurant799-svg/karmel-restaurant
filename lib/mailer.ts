@@ -19,12 +19,20 @@ export async function sendMail(to: string, subject: string, html: string) {
     console.error(`[mailer] RESEND_API_KEY missing — email NOT sent: "${subject}" -> ${to}`);
     return { id: null, error: "not_configured" as const };
   }
-  const { data, error } = await getResend().emails.send({ from: FROM, to, subject, html });
-  if (error) {
-    console.error(`[mailer] send failed: "${subject}" -> ${to}:`, error);
-    return { id: null, error };
+  // A network failure/timeout throws rather than returning { error }. Callers
+  // (e.g. register) have already written to the DB by this point, so surface it
+  // as a normal error result instead of a 500 that leaves a half-finished signup.
+  try {
+    const { data, error } = await getResend().emails.send({ from: FROM, to, subject, html });
+    if (error) {
+      console.error(`[mailer] send failed: "${subject}" -> ${to}:`, error);
+      return { id: null, error };
+    }
+    return { id: data?.id ?? null, error: null };
+  } catch (err) {
+    console.error(`[mailer] send threw: "${subject}" -> ${to}:`, err);
+    return { id: null, error: err };
   }
-  return { id: data?.id ?? null, error: null };
 }
 
 function esc(s: string): string {

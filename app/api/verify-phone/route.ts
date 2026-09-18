@@ -3,10 +3,17 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getFirebaseAdminAuth } from "@/lib/firebaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
+import { readJson, badRequest } from "@/lib/http";
 
 export async function POST(req: NextRequest) {
-  const { idToken, phone } = await req.json();
-  const limited = await rateLimit("otp", phone ?? "unknown");
+  const body = await readJson(req);
+  const idToken = body?.idToken;
+  const phone = body?.phone;
+  if (typeof idToken !== "string" || typeof phone !== "string" || !idToken || !phone) {
+    return badRequest();
+  }
+
+  const limited = await rateLimit("otp", phone);
   if (!limited.success) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }
