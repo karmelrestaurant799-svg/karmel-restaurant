@@ -5,11 +5,12 @@ import { sendMail, otpEmailHtml } from "@/lib/mailer";
 import { generateOtp, otpExpiry } from "@/lib/otp";
 import { rateLimit } from "@/lib/rateLimit";
 import { sha256 } from "@/lib/hash";
+import { readJson } from "@/lib/http";
 
 const schema = z.object({ email: z.string().email() });
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
+  const body = await readJson(req);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });

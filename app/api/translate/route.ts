@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { auth } from "@/lib/auth";
 
 const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
 const DEEPL_ENDPOINT = DEEPL_API_KEY?.endsWith(":fx")
@@ -14,9 +15,16 @@ const translateSchema = z.object({
 export async function POST(req: NextRequest) {
 
   try {
-    const authHeader = req.headers.get("x-internal-secret");
-    if (process.env.INTERNAL_API_SECRET && authHeader !== process.env.INTERNAL_API_SECRET) {
-      return NextResponse.json({ error: "Unauthorized request" }, { status: 401 });
+    // Previously this only checked the secret *if* INTERNAL_API_SECRET was set, so with it
+    // unset (it isn't in .env.example) the route was an open, unmetered proxy to the paid
+    // DeepL account. Nothing in the app calls it; require the secret or an admin session.
+    const secret = process.env.INTERNAL_API_SECRET;
+    const hasSecret = !!secret && req.headers.get("x-internal-secret") === secret;
+    if (!hasSecret) {
+      const session = await auth();
+      if ((session?.user as { role?: string } | undefined)?.role !== "ADMIN") {
+        return NextResponse.json({ error: "Unauthorized request" }, { status: 401 });
+      }
     }
 
     const body = await req.json();

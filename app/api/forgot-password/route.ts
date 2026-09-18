@@ -4,10 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { sendMail, resetPasswordHtml } from "@/lib/mailer";
 import { rateLimit } from "@/lib/rateLimit";
 import { sha256 } from "@/lib/hash";
+import { readJson, badRequest } from "@/lib/http";
 
 export async function POST(req: NextRequest) {
-  const { email } = await req.json();
-  const limited = await rateLimit("otp", email ?? "unknown");
+  const body = await readJson(req);
+  const email = body?.email;
+  if (typeof email !== "string" || !email) return badRequest();
+
+  const limited = await rateLimit("otp", email);
   if (!limited.success) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }

@@ -39,11 +39,13 @@ export async function sendMail(to: string, subject: string, html: string) {
   }
 }
 
-function esc(s: string): string {
+export function esc(s: string): string {
   return String(s)
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export function otpEmailHtml(code: string) {

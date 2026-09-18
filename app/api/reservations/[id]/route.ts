@@ -11,6 +11,7 @@ import {
   reservationChangeRequestHtml,
 } from "@/lib/mailer";
 import { sendSms } from "@/lib/sms";
+import { readJson } from "@/lib/http";
 
 const VALID_STATUSES = ["PENDING", "CONFIRMED", "CANCELLED", "CHANGE_REQUESTED"] as const;
 const updateSchema = z.object({
@@ -29,7 +30,8 @@ async function requireAdmin() {
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!(await requireAdmin())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
-  const body = await req.json();
+  const body = await readJson(req);
+  if (!body) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
   // Validate input
   const parsed = updateSchema.safeParse(body);
