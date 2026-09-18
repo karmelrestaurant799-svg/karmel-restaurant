@@ -1,20 +1,26 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import AdminTable from "./AdminTable";
+import AdminTableClient from "./AdminTableClient";
 
 export default async function AdminPage() {
-  const session = await auth();
-  if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
-    redirect("/login");
-  }
+  const reservations = await prisma.reservation.findMany({
+    where: { date: { gte: new Date(new Date().toDateString()) } },
+    orderBy: { date: "asc" },
+    include: { user: { select: { name: true, email: true } } },
+    take: 500,
+  });
 
-  const reservations = await prisma.reservation.findMany({ orderBy: { date: "asc" } });
+  const formatted = reservations.map((r) => ({
+    id: r.id,
+    name: r.user?.name || r.name,
+    email: r.user?.email || r.email,
+    phone: r.phone,
+    date: r.date.toISOString().split("T")[0],
+    time: r.time,
+    partySize: r.partySize,
+    tableNumber: r.tableNumber,
+    status: r.status,
+    notes: r.notes,
+  }));
 
-  return (
-    <main className="min-h-screen bg-[#0a0a0a] text-stone-200 px-6 md:px-16 py-24">
-      <h1 className="text-4xl text-white mb-10">Reservations</h1>
-      <AdminTable initial={JSON.parse(JSON.stringify(reservations))} />
-    </main>
-  );
+  return <AdminTableClient initial={formatted} />;
 }

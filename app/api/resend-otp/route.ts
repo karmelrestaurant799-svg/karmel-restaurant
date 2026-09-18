@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     data: { emailOtp: sha256(code), emailOtpExpires: otpExpiry(10) },
   });
   const result = await sendMail(email, "Your new verification code", otpEmailHtml(code));
-  if (result.error) console.error("[resend-otp] failed to send code to", email);
+  if (result.error) console.error("[mailer] failed to send OTP to", email);
 
   return NextResponse.json({ ok: true });
 }

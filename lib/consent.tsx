@@ -49,6 +49,7 @@ type ConsentContextValue = {
   consent: ConsentState;
   acceptAll: () => void;
   acceptEssential: () => void;
+  resetConsent: () => void;
 };
 
 const ConsentContext = createContext<ConsentContextValue | null>(null);
@@ -56,12 +57,23 @@ const ConsentContext = createContext<ConsentContextValue | null>(null);
 export function ConsentProvider({ children }: { children: React.ReactNode }) {
   const consent = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  function resetConsent() {
+    cached = null;
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    listeners.forEach((l) => l());
+  }
+
   return (
     <ConsentContext.Provider
       value={{
         consent,
         acceptAll: () => setConsentValue("all"),
         acceptEssential: () => setConsentValue("essential"),
+        resetConsent,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useScroll, useTransform, Variants } from "framer-motion";
@@ -9,6 +9,9 @@ import { useSession, signOut } from "next-auth/react";
 import MenuSection from "@/components/MenuSection";
 import MapEmbed from "@/components/MapEmbed";
 import ReservationForm from "@/components/ReservationForm";
+import Logo from "@/components/Logo";
+import { LanguageSelector } from "@/components/LanguageSelector";
+import { useLanguage } from "@/lib/languageContext";
 import { restaurantInfo } from "@/lib/menuData";
 
 const playfair = Playfair_Display({
@@ -23,12 +26,18 @@ const montserrat = Montserrat({
 });
 
 export default function Home() {
+  const { t } = useLanguage();
   const { scrollY } = useScroll();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileOpenRef = useRef(mobileOpen);
   const [navVisible, setNavVisible] = useState(true);
   const [pastHero, setPastHero] = useState(false);
-  const [lastScrollY, setLastScrollY] = useState(0);
   const [activeSection, setActiveSection] = useState("");
+
+  useEffect(() => {
+    mobileOpenRef.current = mobileOpen;
+    if (mobileOpen) setNavVisible(true);
+  }, [mobileOpen]);
 
   const heroBgY = useTransform(scrollY, [0, 1000], ["0%", "30%"]);
   const heroTextY = useTransform(scrollY, [0, 600], ["0%", "50%"]);
@@ -36,33 +45,79 @@ export default function Home() {
 
   const { data: session } = useSession();
 
-  // Auto-hide navbar: visible on hero, hide when scrolling down past hero,
-  // show again on scroll up or when mouse is near the top (desktop).
+  // Auto-hide navbar + scroll-spy, combined into a single rAF-throttled scroll
+  // handler so we only do one layout read per frame instead of two separate
+  // scroll listeners fighting for the same paint.
   useEffect(() => {
-    const heroThreshold = typeof window !== "undefined" ? window.innerHeight * 0.7 : 500;
+    const sectionIds = ["experience", "menu", "reservations", "location"];
+    const heroThreshold = window.innerHeight * 0.7;
+    let ticking = false;
+    let prevY = window.scrollY;
 
-    const onScroll = () => {
+    const measure = () => {
+      ticking = false;
       const y = window.scrollY;
-      const goingDown = y > lastScrollY;
+      const goingDown = y > prevY;
       const atTop = y < 40;
       const beyondHero = y > heroThreshold;
 
       setPastHero(beyondHero);
 
-      if (atTop || mobileOpen) {
-        setNavVisible(true);
-      } else if (beyondHero && goingDown && y - lastScrollY > 4) {
-        setNavVisible(false);
-      } else if (!goingDown && lastScrollY - y > 4) {
-        setNavVisible(true);
+      setNavVisible((prevVisible) => {
+        if (atTop || mobileOpenRef.current) return true;
+        if (beyondHero && goingDown && y - prevY > 4) return false;
+        if (!goingDown && prevY - y > 4) return true;
+        return prevVisible;
+      });
+
+      // Scroll-spy: section whose band contains the viewport midpoint
+      const mid = y + window.innerHeight * 0.35;
+      let current = "";
+      for (const id of sectionIds) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const top = el.offsetTop;
+        if (mid >= top && mid < top + el.offsetHeight) {
+          current = id;
+          break;
+        }
+      }
+      if (!current) {
+        for (const id of sectionIds) {
+          const el = document.getElementById(id);
+          if (el && el.offsetTop <= mid) current = id;
+        }
+      }
+      if (y < window.innerHeight * 0.45) current = "";
+
+      setActiveSection((prev) => (prev === current ? prev : current));
+      const desired = current ? `#${current}` : "";
+      if (window.location.hash !== desired) {
+        window.history.replaceState(
+          null,
+          "",
+          current ? `#${current}` : window.location.pathname + window.location.search
+        );
       }
 
-      setLastScrollY(y);
+      prevY = y;
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [lastScrollY, mobileOpen]);
+    const onScrollOrResize = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(measure);
+      }
+    };
+
+    measure();
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onScrollOrResize, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, []);
 
   // Desktop: reveal nav when pointer approaches the top edge
   useEffect(() => {
@@ -71,61 +126,6 @@ export default function Home() {
     };
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
-  }, []);
-
-
-  // Scroll-spy: pick the section whose top is closest above the midpoint of the viewport
-  useEffect(() => {
-    const sectionIds = ["experience", "menu", "reservations", "location"];
-
-    const updateActive = () => {
-      const mid = window.scrollY + window.innerHeight * 0.35;
-      let current = "";
-
-      for (const id of sectionIds) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        const top = el.offsetTop;
-        const bottom = top + el.offsetHeight;
-        if (mid >= top && mid < bottom) {
-          current = id;
-          break;
-        }
-      }
-
-      // Fallback: last section whose top is above midpoint
-      if (!current) {
-        for (const id of sectionIds) {
-          const el = document.getElementById(id);
-          if (!el) continue;
-          if (el.offsetTop <= mid) current = id;
-        }
-      }
-
-      // Still in hero
-      if (window.scrollY < window.innerHeight * 0.45) {
-        current = "";
-      }
-
-      setActiveSection((prev) => (prev === current ? prev : current));
-
-      const desired = current ? `#${current}` : "";
-      if (window.location.hash !== desired) {
-        if (current) {
-          window.history.replaceState(null, "", `#${current}`);
-        } else {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        }
-      }
-    };
-
-    updateActive();
-    window.addEventListener("scroll", updateActive, { passive: true });
-    window.addEventListener("resize", updateActive, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", updateActive);
-      window.removeEventListener("resize", updateActive);
-    };
   }, []);
 
   const fadeInUp: Variants = {
@@ -143,7 +143,7 @@ export default function Home() {
       opacity: 1,
       transition: { staggerChildren: 0.12, delayChildren: 0.15 },
     },
-  };
+};
 
   const navLinks = (
     <>
@@ -154,8 +154,8 @@ export default function Home() {
           activeSection === "experience" ? "text-amber-500" : "hover:text-amber-500"
         }`}
       >
-        Experience
-        <span className={`absolute -bottom-1 left-0 h-[1px] bg-amber-500 transition-all duration-300 hidden md:block ${
+        {t.nav.experience}
+        <span className={`absolute -bottom-1 left-0 h-px-amber-500 transition-all duration-300 hidden md:block ${
           activeSection === "experience" ? "w-full" : "w-0 group-hover:w-full"
         }`} />
       </Link>
@@ -166,8 +166,8 @@ export default function Home() {
           activeSection === "menu" ? "text-amber-500" : "hover:text-amber-500"
         }`}
       >
-        Menu
-        <span className={`absolute -bottom-1 left-0 h-[1px] bg-amber-500 transition-all duration-300 hidden md:block ${
+        {t.nav.menu}
+        <span className={`absolute -bottom-1 left-0 h-px bg-amber-500 transition-all duration-300 hidden md:block ${
           activeSection === "menu" ? "w-full" : "w-0 group-hover:w-full"
         }`} />
       </Link>
@@ -178,11 +178,16 @@ export default function Home() {
           activeSection === "location" ? "text-amber-500" : "hover:text-amber-500"
         }`}
       >
-        Location
-        <span className={`absolute -bottom-1 left-0 h-[1px] bg-amber-500 transition-all duration-300 hidden md:block ${
+        {t.nav.location}
+        <span className={`absolute -bottom-1 left-0 h-px bg-amber-500 transition-all duration-300 hidden md:block ${
           activeSection === "location" ? "w-full" : "w-0 group-hover:w-full"
         }`} />
       </Link>
+    </>
+  );
+
+  const userMenu = (
+    <>
       {session?.user ? (
         <>
           {(session.user as { role?: string }).role === "ADMIN" && (
@@ -191,17 +196,30 @@ export default function Home() {
               onClick={() => setMobileOpen(false)}
               className="hover:text-amber-500 transition-colors duration-300"
             >
-              Admin
+              {t.nav.admin}
             </Link>
           )}
+          <Link
+            href="/account"
+            onClick={() => setMobileOpen(false)}
+            className="hover:text-amber-500 transition-colors duration-300 flex items-center gap-1"
+            aria-label={t.nav.account}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </Link>
           <button
             onClick={() => {
               setMobileOpen(false);
               signOut();
             }}
-            className="hover:text-amber-500 transition-colors duration-300 text-left"
+            className="hover:text-amber-500 transition-colors duration-300 flex items-center gap-1"
+            aria-label={t.nav.logout}
           >
-            Sign Out
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
           </button>
         </>
       ) : (
@@ -210,7 +228,7 @@ export default function Home() {
           onClick={() => setMobileOpen(false)}
           className="hover:text-amber-500 transition-colors duration-300"
         >
-          Sign In
+          {t.nav.login}
         </Link>
       )}
     </>
@@ -222,7 +240,7 @@ export default function Home() {
     >
       {/* Noise overlay */}
       <div
-        className="pointer-events-none fixed inset-0 z-[100] opacity-[0.03]"
+        className="pointer-events-none fixed inset-0 z-100 opacity-[0.03]"
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
         }}
@@ -236,36 +254,50 @@ export default function Home() {
           opacity: navVisible ? 1 : 0,
         }}
         transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        className={`fixed w-full z-50 flex items-center justify-between px-4 sm:px-6 md:px-10 lg:px-12 py-4 sm:py-5 md:py-6 transition-colors duration-300 ${
+        className={`fixed w-full z-50 flex items-center px-4 sm:px-6 md:px-10 lg:px-12 py-4 sm:py-5 md:py-6 transition-colors duration-300 ${
           pastHero
             ? "bg-[#0a0a0a]/90 backdrop-blur-md border-b border-white/5"
-            : "bg-gradient-to-b from-[#0a0a0a]/95 to-transparent"
+            : "bg-linear-to-b from-[#0a0a0a]/95 to-transparent"
         }`}
       >
-        <Link href="/" className="group relative flex items-center gap-2">
-          <span
-            className={`text-xl sm:text-2xl md:text-3xl tracking-[0.2em] uppercase font-black ${playfair.className} bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 bg-clip-text text-transparent transition-all duration-500 group-hover:tracking-[0.28em]`}
-          >
-            Karmel
-          </span>
-          <span className="hidden sm:block w-1.5 h-1.5 rounded-full bg-amber-500 opacity-80 group-hover:scale-125 transition-transform duration-300" />
-        </Link>
+        {/* Left: Logo */}
+        <div className="w-1/3 flex justify-start">
+          <Link href="/" className="group relative flex items-center transition-transform duration-500 group-hover:scale-[1.02]">
+            <Logo size="md" />
+          </Link>
+        </div>
 
-        {/* Desktop links */}
-        <div className="hidden md:flex gap-8 lg:gap-12 text-[10px] tracking-[0.3em] uppercase font-medium">
+        {/* Center: Nav links */}
+        <div className="w-1/3 flex justify-center gap-10 lg:gap-14 text-[10px] sm:text-[11px] tracking-[0.3em] sm:tracking-[0.35em] uppercase font-medium invisible md:visible">
           {navLinks}
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Right: User menu, language selector, reservation button */}
+        <div className="w-1/3 flex justify-end items-center gap-3">
+          {/* User menu / login */}
+          <div className="hidden md:flex items-center gap-3">
+            {userMenu}
+          </div>
+
+          {/* Language selector */}
+          <div className="hidden md:flex items-center">
+            <LanguageSelector />
+          </div>
+
+          {/* Reservation button */}
           <Link
             href="#reservations"
             className={`group flex items-center gap-3 text-[10px] uppercase tracking-[0.3em] font-medium ${
               activeSection === "reservations" ? "text-amber-400" : "text-amber-500"
             }`}
           >
-            <span className="hidden sm:block">Reserve</span>
+            <span className="hidden sm:block">{t.nav.reservations}</span>
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-amber-500/30 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-black transition-all duration-300 text-sm">
-              ↗
+              {/* Cocktail glass — on-theme for the bar's reservations CTA */}
+              <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 4.5h14M5 4.5 12 13m7-8.5L12 13m0 0v5.5M8.5 18.5h7" />
+                <circle cx="15.5" cy="7" r="0.9" fill="currentColor" stroke="none" />
+              </svg>
             </div>
           </Link>
 
@@ -274,21 +306,23 @@ export default function Home() {
             type="button"
             aria-label="Toggle menu"
             onClick={() => setMobileOpen((v) => !v)}
-            className="md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5 border border-stone-700 rounded-full"
+            className={`md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5 border rounded-full ml-2 transition-colors duration-300 ${
+              mobileOpen ? "border-amber-500 bg-amber-500/10" : "border-stone-700"
+            }`}
           >
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "rotate-45 translate-y-[4px]" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 rotate-45 translate-y-1 bg-amber-500" : "w-4"
               }`}
             />
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "opacity-0" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 opacity-0" : "w-2.5"
               }`}
             />
             <span
-              className={`block w-4 h-[1.5px] bg-stone-200 transition-all ${
-                mobileOpen ? "-rotate-45 -translate-y-[4px]" : ""
+              className={`block h-[1.5px] bg-stone-200 transition-all duration-300 ${
+                mobileOpen ? "w-4 -rotate-45 -translate-y-1 bg-amber-500" : "w-4"
               }`}
             />
           </button>
@@ -311,23 +345,65 @@ export default function Home() {
           }`}
         >
           {navLinks}
+          <div className="flex flex-col gap-3 pt-4 border-t border-stone-800">
+            {session?.user ? (
+              <>
+                {(session.user as { role?: string }).role === "ADMIN" && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className="text-center hover:text-amber-500 transition-colors"
+                  >
+                    {t.nav.admin}
+                  </Link>
+                )}
+                <Link
+                  href="/account"
+                  onClick={() => setMobileOpen(false)}
+                  className="text-center hover:text-amber-500 transition-colors"
+                >
+                  {t.nav.account}
+                </Link>
+                <button
+                  onClick={() => {
+                    setMobileOpen(false);
+                    signOut();
+                  }}
+                  className="text-center hover:text-amber-500 transition-colors bg-transparent p-0 text-left"
+                >
+                  {t.nav.logout}
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setMobileOpen(false)}
+                className="text-center hover:text-amber-500 transition-colors"
+              >
+                {t.nav.login}
+              </Link>
+            )}
+          </div>
+          <div className="flex justify-center pt-4 border-t border-stone-800">
+            <LanguageSelector />
+          </div>
           <Link
             href="#reservations"
             onClick={() => setMobileOpen(false)}
             className="mt-4 py-3 text-center bg-amber-500 text-black font-bold tracking-[0.2em] text-xs"
           >
-            Reserve a Table
+            {t.reservations.reserveBtn}
           </Link>
         </div>
       </div>
 
       {/* ========== HERO ========== */}
-      <section className="relative h-[100svh] min-h-[480px] max-h-[900px] flex flex-col items-center justify-center text-center px-4 overflow-hidden bg-[#0a0a0a]">
+      <section className="relative h-svh min-h-120-h-[900px] flex flex-col items-center justify-center text-center px-4 overflow-hidden bg-[#0a0a0a]">
         <motion.div
           style={{ y: heroBgY }}
-          className="absolute inset-0 z-0 h-[120%] -top-[10%]"
+          className="absolute inset-0 z-0 h-[120%] top-[-10%]"
         >
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0a]/50 via-transparent to-[#0a0a0a] z-10" />
+          <div className="absolute inset-0 bg-linear-to-b from-[#0a0a0a]/50 via-transparent to-[#0a0a0a] z-10" />
           <Image
             src="https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?q=80&w=2070&auto=format&fit=crop"
             alt="Bar Texture"
@@ -345,18 +421,18 @@ export default function Home() {
           animate="visible"
           className="relative z-10 flex flex-col items-center w-full mt-10 sm:mt-16"
         >
-          <motion.h1
+<motion.h1
             variants={fadeInUp}
             className={`karmel-title-fill text-[18vw] sm:text-[15vw] md:text-[13vw] lg:text-[11vw] font-black uppercase tracking-tighter leading-[0.85] mb-3 sm:mb-4 ${playfair.className}`}
           >
-            Karmel
+            {t.hero.title}
           </motion.h1>
 
           <motion.h2
             variants={fadeInUp}
             className="text-[11px] sm:text-sm md:text-base lg:text-lg font-medium uppercase tracking-[0.25em] sm:tracking-[0.4em] text-stone-200 max-w-xs sm:max-w-none drop-shadow-lg"
           >
-            Café &amp; Restaurant — Somali &amp; African Cuisine
+            {t.hero.subtitle}
           </motion.h2>
         </motion.div>
       </section>
@@ -364,11 +440,11 @@ export default function Home() {
       {/* ========== EXPERIENCE ========== */}
       <section
         id="experience"
-        className="relative py-16 sm:py-24 md:py-28 lg:py-0 px-4 sm:px-6 md:px-10 lg:px-0 min-h-0 lg:h-[100vh] lg:min-h-[640px] lg:max-h-[900px] flex items-center bg-[#0a0a0a] overflow-hidden"
+        className="relative py-16 sm:py-24 md:py-28 lg:py-0 px-4 sm:px-6 md:px-10 lg:px-0 min-h-0 lg:h-screen lg:min-h-160 lg:max-h-225 flex items-center bg-[#0a0a0a] overflow-hidden"
       >
         <div className="absolute inset-0 z-0">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-transparent via-[#0a0a0a]/80 to-[#0a0a0a] z-10" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0a0a0a] via-transparent to-transparent z-10" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,var(--tw-gradient-stops))] from-transparent via-[#0a0a0a]/80 to-[#0a0a0a] z-10" />
+          <div className="absolute inset-0 bg-linear-to-r from-[#0a0a0a] via-transparent to-transparent z-10" />
           <Image
             src="https://images.unsplash.com/photo-1600093463592-8e36ae95ef56?q=80&w=2070&auto=format&fit=crop"
             alt="Coffee Roasting"
@@ -385,24 +461,21 @@ export default function Home() {
           viewport={{ once: true, margin: "-50px" }}
           className="relative z-20 max-w-7xl lg:max-w-none mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 lg:gap-0 items-center h-full"
         >
-          <motion.div
+<motion.div
             variants={fadeInUp}
             className="z-20 p-5 sm:p-8 md:p-12 lg:p-16 xl:p-20 bg-[#0a0a0a]/70 backdrop-blur-md border border-white/5 lg:border-0 lg:h-full lg:flex lg:flex-col lg:justify-center"
           >
             <h2 className="text-[9px] sm:text-[10px] tracking-[0.4em] font-bold text-amber-500 uppercase mb-5 sm:mb-8 flex items-center gap-3 sm:gap-4">
-              <span className="w-6 sm:w-8 h-[1px] bg-amber-500" /> The Philosophy
+              <span className="w-6 sm:w-8 h-px bg-amber-500" /> {t.experience.sectionTitle}
             </h2>
             <h3
               className={`text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-5 sm:mb-8 leading-[1.15] text-white ${playfair.className}`}
             >
-              Rooted in <br />
-              <span className="italic text-stone-400">tradition.</span>
+              {(t.experience.sectionSubtitle || "Rooted in tradition.").split('. ')[0]} <br />
+              <span className="italic text-stone-400">{(t.experience.sectionSubtitle || "Rooted in tradition.").split('. ')[1] || "Rooted in tradition."}</span>
             </h3>
             <p className="text-stone-300 font-light leading-relaxed sm:leading-loose text-sm md:text-base max-w-md">
-              From Somali chai and specialty coffee at breakfast to Bariis and
-              Baasto platters for dinner, Karmel Café &amp; Restaurant is a
-              sensory journey rooted in Somali and East African tradition,
-              served in the heart of Schweinfurt.
+              {t.experience.sectionDescription || "From Somali chai and specialty coffee at breakfast to Bariis and Baasto platters for dinner, Karmel Café & Restaurant is a sensory journey rooted in Somali and East African tradition, served in the heart of Schweinfurt."}
             </p>
           </motion.div>
 
@@ -429,7 +502,7 @@ export default function Home() {
       {/* ========== RESERVATIONS ========== */}
       <section
         id="reservations"
-        className="relative py-16 sm:py-24 md:py-28 lg:py-0 lg:h-[100vh] lg:min-h-[640px] lg:max-h-[900px] px-4 sm:px-6 flex items-center justify-center"
+        className="relative py-16 sm:py-24 md:py-28 lg:py-0 lg:h-screen lg:min-h-160 lg:max-h-225 px-4 sm:px-6 flex items-center justify-center"
       >
         <div className="absolute inset-0 z-0">
           <Image
@@ -439,7 +512,7 @@ export default function Home() {
             className="object-cover"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/65 to-[#0a0a0a]" />
+          <div className="absolute inset-0 bg-linear-to-t from-[#0a0a0a] via-[#0a0a0a]/65 to-[#0a0a0a]" />
         </div>
 
         <motion.div
@@ -453,10 +526,10 @@ export default function Home() {
             <h2
               className={`text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3 text-white ${playfair.className}`}
             >
-              Reserve a Table
+              {t.reservations.sectionTitle}
             </h2>
             <p className="text-stone-300 text-xs sm:text-sm tracking-widest font-light">
-              Join the atmosphere.
+              {t.reservations.sectionSubtitle}
             </p>
           </div>
           <ReservationForm />
@@ -466,17 +539,17 @@ export default function Home() {
       {/* ========== LOCATION ========== */}
       <section
         id="location"
-        className="relative bg-[#0a0a0a] py-14 sm:py-20 md:py-24 lg:py-0 lg:h-[100vh] lg:min-h-[560px] lg:max-h-[800px] px-4 sm:px-6 md:px-10 lg:px-16 border-t border-stone-900 flex items-center"
+        className="relative bg-[#0a0a0a] py-14 sm:py-20 md:py-24 lg:py-0 lg:h-screen lg:min-h-140 lg:max-h-2004 sm:px-6 md:px-10 lg:px-16 border-t border-stone-900 flex items-center"
       >
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-10 sm:gap-12 md:gap-16 items-center">
           <div>
             <h2 className="text-[9px] sm:text-[10px] tracking-[0.4em] font-bold text-amber-500 uppercase mb-3 sm:mb-4">
-              Find Us
+              {t.location.sectionTitle}
             </h2>
             <h3
               className={`text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-5 sm:mb-8 text-white ${playfair.className}`}
             >
-              Visit Karmel
+              {t.location.sectionSubtitle}
             </h3>
             <a
               href={restaurantInfo.mapsUrl}
@@ -493,15 +566,19 @@ export default function Home() {
               {restaurantInfo.phone}
             </a>
             <div className="text-stone-400 text-xs sm:text-sm space-y-1.5">
-              {restaurantInfo.hours.map((h) => (
-                <div
-                  key={h.day}
-                  className="flex justify-between max-w-xs gap-4"
-                >
-                  <span>{h.day}</span>
-                  <span className="text-stone-300 whitespace-nowrap">{h.time}</span>
-                </div>
-              ))}
+              {restaurantInfo.hours.map((h) => {
+                const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                const dayIndex = dayNames.indexOf(h.day.slice(0, 3));
+                const dateStr = `2024-01-${dayIndex + 1}`;
+                const dayNum = new Date(dateStr).getDay();
+                const dayName = t.common.dayNamesShort?.[dayNum] || dayNames[dayNum];
+                return (
+                  <div key={h.day} className="flex justify-between max-w-xs gap-4">
+                    <span>{dayName}</span>
+                    <span className="text-stone-300 whitespace-nowrap">{h.time}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <MapEmbed />
@@ -518,19 +595,12 @@ export default function Home() {
             className="object-cover opacity-30 sm:opacity-40 grayscale"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0a] via-[#0a0a0a]/50 to-[#0a0a0a]" />
+          <div className="absolute inset-0 bg-linear-to-b from-[#0a0a0a] via-[#0a0a0a]/50 to-[#0a0a0a]" />
         </div>
 
         <div className="relative z-10 w-full max-w-5xl px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row justify-between items-center gap-6 sm:gap-8">
-            <div className="flex items-center gap-3">
-              <span
-                className={`text-2xl sm:text-3xl tracking-[0.22em] uppercase font-black ${playfair.className} bg-gradient-to-r from-amber-400 via-amber-500 to-amber-300 bg-clip-text text-transparent`}
-              >
-                Karmel
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            </div>
+            <Logo size="sm" />
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-6 text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] text-stone-300 items-center">
               <a
                 href={restaurantInfo.mapsUrl}
@@ -538,28 +608,36 @@ export default function Home() {
                 rel="noopener noreferrer"
                 className="hover:text-amber-500 transition-colors text-center"
               >
-                {restaurantInfo.address}
+                {t.footer.address}
               </a>
               <p className="hidden sm:block text-amber-500">|</p>
               <a
                 href={restaurantInfo.phoneHref}
                 className="hover:text-amber-500 transition-colors"
               >
-                {restaurantInfo.phone}
+                {t.footer.phone}
               </a>
             </div>
           </div>
-          <div className="flex items-center justify-center gap-4 mt-10 sm:mt-16 text-[8px] sm:text-[9px] uppercase tracking-[0.2em] text-stone-500">
-            <Link href="/impressum" className="hover:text-amber-500 transition-colors">
-              Impressum
-            </Link>
+          <div className="flex justify-center gap-4 sm:gap-6 mt-10 sm:mt-16 text-[9px] sm:text-[10px] uppercase tracking-[0.2em] text-stone-500">
+            <Link href="/impressum" className="hover:text-amber-500 transition-colors">{t.footer.impressum}</Link>
             <span className="text-stone-700">|</span>
-            <Link href="/datenschutz" className="hover:text-amber-500 transition-colors">
-              Datenschutz
-            </Link>
+            <Link href="/datenschutz" className="hover:text-amber-500 transition-colors">{t.footer.privacy}</Link>
+            <span className="text-stone-700">|</span>
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  localStorage.removeItem("karmel-cookie-consent");
+                  window.location.reload();
+                }
+              }}
+              className="hover:text-amber-500 transition-colors bg-transparent p-0"
+            >
+              {t.footer.cookieSettings}
+            </button>
           </div>
           <p className="text-stone-500 text-[8px] sm:text-[9px] uppercase tracking-[0.25em] mt-4">
-            &copy; {new Date().getFullYear()} Karmel Café &amp; Restaurant.
+            &copy; {new Date().getFullYear()} Karmel Café & Restaurant. {t.footer.rights}
           </p>
         </div>
       </footer>

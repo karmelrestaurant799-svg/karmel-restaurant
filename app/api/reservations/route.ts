@@ -11,11 +11,14 @@ const schema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email().max(254),
   phone: z.string().min(6).max(32),
-  // yyyy-mm-dd from the form. An unparseable value used to reach
-  // prisma.reservation.create as an Invalid Date and surface as a 500.
-  date: z.string().refine((s) => !Number.isNaN(new Date(s).getTime()), {
-    message: "Please enter a valid date.",
-  }),
+  // An unparseable date compares as NaN >= today, i.e. false, so it is rejected
+  // here with a 400 rather than reaching Prisma as an Invalid Date (500).
+  date: z.string().refine((val) => {
+    const date = new Date(val);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date >= today;
+  }, { message: "Reservation date must be today or in the future" }),
   time: z.string().max(20),
   partySize: z.coerce.number().int().min(1).max(30),
   notes: z.string().max(1000).optional(),
@@ -83,6 +86,10 @@ export async function GET() {
   if (!session?.user || (session.user as { role?: string }).role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const reservations = await prisma.reservation.findMany({ orderBy: { date: "asc" } });
+  const reservations = await prisma.reservation.findMany({
+    where: { date: { gte: new Date(new Date().toDateString()) } },
+    orderBy: { date: "asc" },
+    take: 500,
+  });
   return NextResponse.json({ reservations });
 }

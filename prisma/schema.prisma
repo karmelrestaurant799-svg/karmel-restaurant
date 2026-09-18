@@ -16,6 +16,7 @@ enum ReservationStatus {
   PENDING
   CONFIRMED
   CANCELLED
+  CHANGE_REQUESTED
 }
 
 model User {
@@ -27,6 +28,8 @@ model User {
   role              Role      @default(USER)
 
   emailVerified     DateTime?
+  image             String?
+
   emailOtp          String?
   emailOtpExpires   DateTime?
 
@@ -46,7 +49,6 @@ model User {
   createdAt DateTime @default(now())
 }
 
-// Standard Auth.js (NextAuth v5) Prisma adapter models — needed for Google/Facebook login
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -97,6 +99,62 @@ model Reservation {
   notes       String?
   status      ReservationStatus @default(PENDING)
   consentAt   DateTime?
+  responseToken String? @unique
+
+  // Set when the admin proposes a different time; customer has not responded yet.
+  requestedTime DateTime?
 
   createdAt DateTime @default(now())
+
+  // Prevents two reservations on the SAME table at the SAME date+time.
+  // Different tables at the same time slot are unaffected.
+  @@unique([date, time, tableNumber])
+  // Every admin/API query filters or sorts by these — without indexes each
+  // one is a full table scan that gets slower as reservations pile up.
+  @@index([date])
+  @@index([date, status])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model MenuCategory {
+  id            String        @id @default(cuid())
+  slug          String        @unique
+  title         String
+  subtitle      String
+  order         Int           @default(0)
+  isMainCategory Boolean      @default(false)
+  parentId      String?
+  parent        MenuCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children      MenuCategory[] @relation("CategoryHierarchy")
+  items         MenuItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+}
+
+model MenuItem {
+  id         String       @id @default(cuid())
+  categoryId String
+  category   MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  name      String
+  desc      String?
+  price     String
+  star      Boolean  @default(false)
+  available Boolean  @default(true)
+  order     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Translation {
+  id        String   @id @default(cuid())
+  lang      String   @unique
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

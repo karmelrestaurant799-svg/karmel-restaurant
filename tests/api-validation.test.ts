@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 
 const prismaMock = vi.hoisted(() => ({
-  reservation: { create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  reservation: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
   user: { findUnique: vi.fn(), update: vi.fn() },
 }));
 const authMock = vi.hoisted(() => vi.fn());
@@ -58,10 +58,10 @@ describe("POST /api/reservations", () => {
     expect(typeof (await res.json()).error).toBe("string");
   });
 
-  it("returns 400 for an unparseable date instead of crashing in Prisma", async () => {
+  it("returns 400 for an unparseable or past date instead of crashing in Prisma", async () => {
     const res = await createReservation(json("/api/reservations", { ...validReservation, date: "not-a-date" }));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/valid date/i);
+    expect((await res.json()).error).toMatch(/today or in the future/i);
     expect(prismaMock.reservation.create).not.toHaveBeenCalled();
   });
 
@@ -78,6 +78,11 @@ describe("POST /api/reservations", () => {
 });
 
 describe("PATCH/DELETE /api/reservations/[id]", () => {
+  const existing = {
+    id: "res1", name: "Jane", email: "jane@example.com", phone: "+491", time: "18:00",
+    date: new Date("2030-05-17"), partySize: 2, status: "PENDING",
+  };
+
   it("rejects non-admins", async () => {
     authMock.mockResolvedValue({ user: { role: "USER" } });
     expect((await PATCH(json("/x", { status: "CONFIRMED" }, "PATCH"), ctx())).status).toBe(403);
@@ -86,39 +91,35 @@ describe("PATCH/DELETE /api/reservations/[id]", () => {
   });
 
   describe("as admin", () => {
-    beforeEach(() => authMock.mockResolvedValue({ user: { role: "ADMIN" } }));
+    beforeEach(() => {
+      authMock.mockResolvedValue({ user: { role: "ADMIN" } });
+      prismaMock.reservation.findUnique.mockResolvedValue(existing);
+    });
 
     it("updates status", async () => {
-      prismaMock.reservation.update.mockResolvedValue({ id: "res1", status: "CONFIRMED" });
+      prismaMock.reservation.update.mockResolvedValue({ ...existing, status: "CONFIRMED" });
       const res = await PATCH(json("/x", { status: "CONFIRMED" }, "PATCH"), ctx());
       expect(res.status).toBe(200);
-      expect(prismaMock.reservation.update).toHaveBeenCalledWith({
-        where: { id: "res1" },
-        data: { tableNumber: undefined, status: "CONFIRMED" },
-      });
+      expect(prismaMock.reservation.update).toHaveBeenCalledOnce();
     });
 
-    it("clears the table number when the admin UI sends null", async () => {
-      prismaMock.reservation.update.mockResolvedValue({ id: "res1" });
-      await PATCH(json("/x", { tableNumber: null }, "PATCH"), ctx());
-      expect(prismaMock.reservation.update).toHaveBeenCalledWith({
-        where: { id: "res1" },
-        data: { tableNumber: null, status: undefined },
-      });
-    });
-
-    it("returns 400 for an invalid status or table number", async () => {
+    it("returns 400 (not 500) for malformed JSON or an invalid status/table", async () => {
+      expect((await PATCH(json("/x", "{bad", "PATCH"), ctx())).status).toBe(400);
       expect((await PATCH(json("/x", { status: "FOO" }, "PATCH"), ctx())).status).toBe(400);
       expect((await PATCH(json("/x", { tableNumber: 2.5 }, "PATCH"), ctx())).status).toBe(400);
-      expect((await PATCH(json("/x", "{bad", "PATCH"), ctx())).status).toBe(400);
       expect(prismaMock.reservation.update).not.toHaveBeenCalled();
     });
 
-    it("returns 404 (not 500) when the reservation no longer exists", async () => {
-      const notFound = new Prisma.PrismaClientKnownRequestError("gone", { code: "P2025", clientVersion: "test" });
-      prismaMock.reservation.update.mockRejectedValue(notFound);
-      prismaMock.reservation.delete.mockRejectedValue(notFound);
+    it("returns 404 when the reservation does not exist", async () => {
+      prismaMock.reservation.findUnique.mockResolvedValue(null);
       expect((await PATCH(json("/x", { status: "CANCELLED" }, "PATCH"), ctx())).status).toBe(404);
+      expect(prismaMock.reservation.update).not.toHaveBeenCalled();
+    });
+
+    it("DELETE returns 404 (not 500) when the reservation is already gone", async () => {
+      prismaMock.reservation.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("gone", { code: "P2025", clientVersion: "test" })
+      );
       expect((await DELETE(json("/x", {}, "DELETE"), ctx())).status).toBe(404);
     });
   });

@@ -1,11 +1,13 @@
 "use client";
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useRef } from "react";
+import { useLanguage } from "@/lib/languageContext";
 
 export default function ReservationForm() {
+  const { t } = useLanguage();
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [error, setError] = useState("");
   const [consent, setConsent] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -20,34 +22,35 @@ export default function ReservationForm() {
     });
     const json = await res.json();
     if (!res.ok) {
-      setError(json.error || "Something went wrong.");
+      setError(json.error || t.reservations.error);
       setStatus("error");
       return;
     }
+    // Reset form before changing status to avoid unmounting
+    formRef.current?.reset();
     setStatus("done");
-    e.currentTarget.reset();
     setConsent(false);
   }
 
   if (status === "done") {
     return (
       <p className="text-center text-amber-500 text-xs sm:text-sm tracking-widest uppercase py-8 sm:py-10">
-        Thank you — check your email for confirmation.
+        {t.reservations.success}
       </p>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-6 sm:gap-8 md:gap-10">
+    <form ref={formRef} onSubmit={onSubmit} className="flex flex-col gap-6 sm:gap-8 md:gap-10">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 md:gap-10">
-        <Field label="Full Name" name="name" type="text" placeholder="Jane Doe" required />
-        <Field label="Email" name="email" type="email" placeholder="jane@example.com" required />
-        <Field label="Phone" name="phone" type="tel" placeholder="+49 176 21313818" required />
-        <Field label="Guests" name="partySize" type="number" min={1} max={30} defaultValue={2} required />
-        <Field label="Date" name="date" type="date" required />
+        <Field label={t.reservations.name} name="name" type="text" placeholder="Jane Doe" required />
+        <Field label={t.reservations.email} name="email" type="email" placeholder="jane@example.com" required />
+        <Field label={t.reservations.phone} name="phone" type="tel" placeholder="+49 176 21313818" required />
+        <Field label={t.reservations.guests} name="partySize" type="number" min={1} max={30} defaultValue={2} required />
+        <Field label={t.reservations.date} name="date" type="date" required />
         <div className="flex flex-col gap-1.5 sm:gap-2 border-b border-stone-600 focus-within:border-amber-500 transition-colors">
           <label className="text-[9px] sm:text-[10px] uppercase tracking-[0.2em] text-stone-400 font-bold">
-            Time
+            {t.reservations.time}
           </label>
           <select
             name="time"
@@ -56,7 +59,7 @@ export default function ReservationForm() {
             className="bg-transparent border-none py-2 text-white focus:outline-none focus:ring-0 appearance-none font-light text-sm sm:text-base"
           >
             <option value="" disabled>
-              Select Time
+              {t.reservations.selectTime}
             </option>
             <option value="12:00">12:00 PM</option>
             <option value="18:00">6:00 PM</option>
@@ -75,12 +78,7 @@ export default function ReservationForm() {
           className="mt-0.5 accent-amber-500"
         />
         <span>
-          I accept the processing of my data for this reservation as described
-          in the{" "}
-          <Link href="/datenschutz" target="_blank" className="text-amber-500 underline">
-            privacy policy
-          </Link>
-          .
+          {t.reservations.consent}
         </span>
       </label>
 
@@ -90,7 +88,7 @@ export default function ReservationForm() {
         disabled={status === "loading" || !consent}
         className="w-full mt-2 sm:mt-4 py-4 sm:py-5 bg-amber-500 text-[#0a0a0a] text-[10px] sm:text-xs font-bold tracking-[0.25em] sm:tracking-[0.3em] uppercase hover:bg-white hover:text-black transition-all duration-500 disabled:opacity-50 touch-manipulation"
       >
-        {status === "loading" ? "Sending..." : "Confirm Reservation"}
+        {status === "loading" ? t.reservations.sending : t.reservations.submit}
       </button>
     </form>
   );

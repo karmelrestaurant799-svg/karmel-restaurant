@@ -18,13 +18,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Too many attempts. Try again later." }, { status: 429 });
   }
 
+  let decoded;
   try {
-    const decoded = await getFirebaseAdminAuth().verifyIdToken(idToken);
-    if (!decoded.phone_number || decoded.phone_number !== phone) {
-      return NextResponse.json({ error: "Phone number mismatch." }, { status: 400 });
-    }
+    const auth = getFirebaseAdminAuth();
+    decoded = await auth.verifyIdToken(idToken);
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("Firebase Admin is not configured")) {
+    if (err instanceof Error && err.message.includes("Firebase Admin is not configured")) {
       console.error("[verify-phone]", err.message);
       return NextResponse.json(
         { error: "Phone verification is temporarily unavailable." },
@@ -32,6 +31,10 @@ export async function POST(req: NextRequest) {
       );
     }
     return NextResponse.json({ error: "Invalid or expired verification." }, { status: 400 });
+  }
+
+  if (!decoded.phone_number || decoded.phone_number !== phone) {
+    return NextResponse.json({ error: "Phone number mismatch." }, { status: 400 });
   }
 
   try {
