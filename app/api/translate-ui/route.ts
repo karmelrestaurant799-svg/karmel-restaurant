@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { fallbackTranslations } from "@/lib/translations";
+import { readJson } from "@/lib/http";
 
 const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
 const DEEPL_ENDPOINT = DEEPL_API_KEY?.endsWith(":fx")
@@ -67,12 +69,14 @@ function unflatten(
   return template;
 }
 
+// The caller only chooses the language. The text that gets translated (and cached for every
+// visitor) is always the server's own German dictionary. This route used to accept a
+// client-supplied `sourceDict`; the first caller per language could therefore choose what
+// the whole site displayed in that language, including HTML that /datenschutz renders via
+// dangerouslySetInnerHTML. Any extra keys (e.g. an old client still sending sourceDict)
+// are stripped by zod and ignored.
 const translateUiSchema = z.object({
   targetLang: z.enum(["en", "es", "fr", "it", "nl", "tr", "pl", "ru", "ar", "zh", "ja"]),
-  sourceDict: z.record(z.unknown()).refine(
-    (dict) => JSON.stringify(dict).length < 100000,
-    "Source dictionary too large (max 100KB)"
-  ),
 });
 
 export async function POST(req: NextRequest) {
@@ -82,7 +86,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Translation service not configured" }, { status: 503 });
     }
 
-    const body = await req.json();
+    const body = await readJson(req);
     const parsed = translateUiSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -92,7 +96,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { targetLang, sourceDict } = parsed.data;
+    const { targetLang } = parsed.data;
+    const sourceDict = fallbackTranslations.de;
 
     // 1. Check database cache first (graceful fallback if DB unavailable)
     let cached: { data: Prisma.JsonValue } | null = null;
