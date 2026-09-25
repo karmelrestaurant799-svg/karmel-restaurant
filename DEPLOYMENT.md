@@ -5,9 +5,14 @@ Do these in order. Every value you collect goes into `.env` locally and into
 
 ## 1. Database — Neon Postgres (free tier works)
 1. Go to https://neon.tech → sign up → "Create a project".
-2. Copy the connection string shown (starts with `postgresql://`).
-3. Paste it into `DATABASE_URL` in `.env`.
-4. Run locally: `npm install` → `npx prisma db push` (creates all tables).
+2. Click **Connect** and copy the connection string (starts with `postgresql://`).
+   The **pooled** one (host contains `-pooler`) goes into `DATABASE_URL` for the app.
+3. Create the tables with the **direct** string (turn "Connection pooling" off),
+   given in the command itself so it can't hit the wrong database:
+   `DATABASE_URL="<direct string>" npx prisma db push`
+   (Command Prompt: `set "DATABASE_URL=<direct string>"` first; PowerShell: `$env:DATABASE_URL="..."`).
+   On a new empty database it should report "in sync"; if Prisma warns about
+   data loss, stop — you are pointed at a database that already has data.
 
 ## 2. Auth.js secret
 1. Run: `npx auth secret` (or `openssl rand -base64 32`).
@@ -32,14 +37,23 @@ Do these in order. Every value you collect goes into `.env` locally and into
 3. Settings → Basic → copy App ID / App Secret into `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET`.
 4. Switch the app from "Development" to "Live" mode once ready for real users.
 
-## 5. Resend — email (verification codes, password reset, reservation confirmations)
-1. Go to https://resend.com → sign up (free tier: 3,000 emails/month).
-2. "API Keys" → create one → paste into `RESEND_API_KEY`.
-3. "Domains" → add your real domain and verify it (DNS records) so `EMAIL_FROM`
-   can use your domain (e.g. `Karmel <reservations@karmel-restaurant.com>`).
-   Until then, use the default `onboarding@resend.dev` sender for testing.
-4. Set `ADMIN_EMAIL` to the restaurant owner's inbox — this is where every new
+## 5. Gmail — email (verification codes, password reset, reservation confirmations)
+The app sends email through Gmail's SMTP server (Nodemailer, `lib/mailer.ts`).
+1. Use the Google account that should send the site's emails.
+2. Turn on **2-Step Verification** for it (myaccount.google.com → Security).
+   App Passwords require it, and a Google Workspace admin can disable them.
+3. Create an **App Password** at https://myaccount.google.com/apppasswords
+   (name it e.g. "Karmel website") and copy the 16 characters.
+4. Set `GMAIL_USER` (the full address), `GMAIL_APP_PASSWORD` (the 16 characters,
+   no spaces) and `EMAIL_FROM` (e.g. `Karmel Café & Restaurant <address@gmail.com>`).
+   Gmail normally replaces the From address with `GMAIL_USER`, so the sender
+   customers see is that account, and replies go to it.
+5. Set `ADMIN_EMAIL` to the restaurant owner's inbox — this is where every new
    reservation notification (name, email, phone, day, date, time, guests) is sent.
+6. A free Gmail account can send to roughly 500 recipients per day (Google sets
+   the exact limit). That is plenty for a restaurant but not for newsletters.
+   If the credentials are missing the app keeps running and logs
+   `email NOT sent`, so check the logs if mails don't arrive.
 
 ## 6. Firebase — phone number OTP verification
 Phone OTP is handled by Firebase Authentication (client SDK sends the SMS via
@@ -59,20 +73,24 @@ Admin SDK service account.
    the JSON — the app converts them to real newlines at runtime).
 5. On Firebase's free (Spark) plan, phone auth is limited to a small daily
    quota and test numbers; upgrade to Blaze (pay-as-you-go) before real launch
-   traffic. If these variables are missing or wrong in production, phone
-   verification returns a clean "temporarily unavailable" error instead of
-   crashing the rest of the site — but it should still be configured properly
-   before launch.
+   traffic. If the server-side `FIREBASE_*` variables are missing or wrong in
+   production, phone verification returns a clean "temporarily unavailable"
+   error instead of crashing the rest of the site — but it should still be
+   configured properly before launch.
+6. The four `NEXT_PUBLIC_FIREBASE_*` values are baked in at **build time**. If
+   `NEXT_PUBLIC_FIREBASE_API_KEY` is missing or malformed, `next build` fails
+   while prerendering `/register` with `auth/invalid-api-key`. Set them before
+   the first deploy, and redeploy after changing them.
 
-## 7. Upstash Redis — rate limiting (REQUIRED before production)
-1. Go to https://upstash.com → sign up → "Create Database" (Redis, Global/Regional, free tier).
+## 7. Upstash Redis — rate limiting (set before going live)
+1. Go to https://upstash.com → sign up → "Create Database" (Redis, an EU region, free tier).
 2. Copy "REST URL" and "REST TOKEN" → `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`.
-   Locally (`NODE_ENV=development`), the app runs without these and just logs
-   a warning that rate limiting is disabled. In production (`NODE_ENV=production`,
-   which Vercel sets automatically), the app **refuses to start** if these are
-   missing — rate limiting cannot be silently skipped on a live deployment,
-   since it's the only thing standing between the OTP/registration endpoints
-   and brute-force/abuse.
+   **If these are missing the app still starts, but rate limiting is silently
+   switched off**, and it is the only thing standing between the login, OTP and
+   registration endpoints and brute-force/abuse. If Upstash rejects the
+   credentials, requests are allowed through and a warning is logged. So on a
+   live site, always set them and confirm that repeated wrong-password logins
+   get blocked after 10 attempts.
 
 ## 7b. Data retention cleanup (GDPR)
 1. Generate a secret: `openssl rand -hex 32` → put it in `CRON_SECRET`.
@@ -86,13 +104,33 @@ Admin SDK service account.
 
 ## 7c. Legal pages — REQUIRED before going live in Germany
 `/impressum` and `/datenschutz` exist as templates with `[bracketed
-placeholders]` for your real business details (legal name/form, register
-info, VAT ID if any, contact email, hosting/database provider names, and the
-retention periods above). Fill these in — and ideally have them checked by a
+placeholders]` for your real business details. They read these variables (see
+`.env.example` for defaults): `OPERATOR_NAME`, `CONTENT_RESPONSIBLE`,
+`COMMERCIAL_REGISTER`, `VAT_ID`, `CONTACT_EMAIL`, `HOSTING_PROVIDER`,
+`DATABASE_PROVIDER`, `LOG_RETENTION_DAYS` and
+`PARTICIPATES_IN_DISPUTE_RESOLUTION` (must be exactly `true` to switch on),
+plus the retention periods above. Fill these in — and ideally have them checked by a
 German lawyer or a service like eRecht24/Trusted Shops — before the site is
 publicly reachable. An incomplete or missing Impressum is a common target for
 German cease-and-desist letters (*Abmahnungen*), independent of any GDPR fine
 risk.
+
+## 7d. Translations — DeepL
+The language switcher translates the German UI text with DeepL (`/api/translate-ui`)
+and caches each language in the database (`Translation` table).
+1. Create an API key at https://www.deepl.com/pro-api (the free plan works; free keys end in `:fx`).
+2. Put it in `DEEPL_API_KEY`. Without it, choosing a non-German language falls back to German.
+3. Set `INTERNAL_API_SECRET` (`openssl rand -hex 32`). It protects `/api/translate`,
+   which the site itself never calls; only an admin session or this secret can use it.
+4. The German text is the only source that is ever translated. If you edit it in
+   `lib/translations.ts`, clear the cache so other languages pick up the change:
+   `DELETE FROM "Translation";` (they are rebuilt on the next visit).
+
+## 7e. SMS — Twilio (optional)
+Reservation confirmations, cancellations and time-change requests can also be
+texted. Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_SMS_FROM_NUMBER`.
+If any is missing, texts are skipped and a line is logged; nothing else changes.
+(Login phone verification uses Firebase, not Twilio.)
 
 ## 8. First admin account
 There's no public "become admin" button (by design). After you register your
@@ -125,4 +163,4 @@ This flips your `role` to `ADMIN`, unlocking `/admin`.
   email verification and sign in without ever finishing the phone-OTP step.
 - Registration, login, and OTP endpoints are all rate-limited per IP/email via
   Upstash so scripted signup/brute-force attempts get throttled automatically
-  (required in production — see §7).
+  (only while the Upstash variables are set — see §7).
