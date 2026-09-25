@@ -10,14 +10,16 @@ table reservations, and an admin dashboard for managing them.
 - [Prisma](https://www.prisma.io) + PostgreSQL
 - [NextAuth v5](https://authjs.dev) (credentials + Google/Facebook OAuth)
 - [Firebase Authentication](https://firebase.google.com/docs/auth) for phone OTP
-- [Resend](https://resend.com) for transactional email
+- [Nodemailer](https://nodemailer.com) + Gmail SMTP for transactional email
 - [Upstash Redis](https://upstash.com) for rate limiting
+- [DeepL](https://www.deepl.com/pro-api) for the language switcher, and optionally
+  [Twilio](https://www.twilio.com) for reservation SMS
 
 ## Getting started
 
 1. Copy `.env.example` to `.env` and fill in real values — see
    [`DEPLOYMENT.md`](./DEPLOYMENT.md) for step-by-step instructions for every
-   external service (database, auth providers, Firebase, Resend, Upstash).
+   external service (database, auth providers, Gmail, Firebase, Upstash, DeepL).
 2. Install dependencies and set up the database:
    ```bash
    npm install
@@ -44,10 +46,12 @@ table reservations, and an admin dashboard for managing them.
 ## Data model
 
 See [`prisma/schema.prisma`](./prisma/schema.prisma) for the full schema —
-`User` (auth + verification state), `Reservation` (table bookings), plus the
+`User` (auth + verification state), `Reservation` (table bookings),
+`MenuCategory` / `MenuItem` (the menu, edited from the admin area and seeded with
+`scripts/seed-menu.mjs`), `Translation` (cached per-language UI text), plus the
 standard Auth.js adapter tables (`Account`, `Session`, `VerificationToken`).
-The menu itself is static content in [`lib/menuData.ts`](./lib/menuData.ts),
-not database-backed — editing it requires a code change and redeploy.
+Restaurant details such as the address and opening hours live in
+[`lib/menuData.ts`](./lib/menuData.ts).
 
 ## Deployment
 
