@@ -1,23 +1,42 @@
 "use client";
+import { useState } from "react";
 import { restaurantInfo } from "@/lib/menuData";
-import { openConsentSettings, useEmbeddingConsent } from "@/lib/consent";
+import { useEmbeddingConsent } from "@/lib/consent";
 import { useLanguage } from "@/lib/languageContext";
 
-export default function MapEmbed() {
-  const mapsAllowed = useEmbeddingConsent("Google Maps");
-  const { t } = useLanguage();
+// Shown before the map loads. German for "de", English for every other language.
+const NOTICE = {
+  de: {
+    text: "Beim Laden der Karte werden Daten (u. a. Ihre IP-Adresse) an Google übertragen. Mehr dazu in unserer Datenschutzerklärung.",
+    load: "Karte laden",
+    open: "In Google Maps öffnen",
+  },
+  en: {
+    text: "Loading the map sends data (including your IP address) to Google. See our privacy policy for details.",
+    load: "Load map",
+    open: "Open in Google Maps",
+  },
+};
 
-  if (!mapsAllowed) {
+export default function MapEmbed() {
+  // Allowed for good via the "Google Maps" embedding in CCM19, or for this
+  // visit by clicking "Load map" (2-click solution).
+  const mapsAllowed = useEmbeddingConsent("Google Maps");
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const { lang, t } = useLanguage();
+  const notice = lang === "de" ? NOTICE.de : NOTICE.en;
+
+  if (!mapsAllowed && !loadedOnce) {
     return (
       <div className="w-full h-52 sm:h-64 md:h-80 border border-white/10 flex flex-col items-center justify-center gap-4 bg-white/5 text-center px-6">
         <p className="text-stone-400 text-xs sm:text-sm max-w-sm">
-          {t.location.map}
+          {notice.text}
         </p>
         <button
-          onClick={openConsentSettings}
+          onClick={() => setLoadedOnce(true)}
           className="px-5 py-2.5 text-[10px] sm:text-xs uppercase tracking-widest bg-amber-500 text-black font-bold hover:bg-white transition-colors"
         >
-          {t.location.map}
+          {notice.load}
         </button>
         <a
           href={restaurantInfo.mapsUrl}
@@ -25,7 +44,7 @@ export default function MapEmbed() {
           rel="noopener noreferrer"
           className="text-[10px] sm:text-xs text-amber-500 underline"
         >
-          {t.location.map}
+          {notice.open}
         </a>
       </div>
     );
