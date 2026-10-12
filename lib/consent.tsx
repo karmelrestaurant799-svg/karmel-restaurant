@@ -37,7 +37,15 @@ export function useEmbeddingConsent(name: string): boolean {
   return useSyncExternalStore(subscribe, () => embeddingAccepted(name), () => false);
 }
 
-/** Opens the CCM19 settings dialog (footer "Cookie settings", map placeholder). */
+/**
+ * Opens the CCM19 settings dialog (footer "Cookie settings", map placeholder).
+ * When CCM19 is blocked (e.g. Brave Shields or an ad blocker), falls back to
+ * the privacy policy so the button never silently does nothing.
+ */
 export function openConsentSettings() {
-  window.CCM?.openWidget?.();
+  if (window.CCM?.openWidget) {
+    window.CCM.openWidget();
+  } else {
+    window.location.href = "/datenschutz";
+  }
 }
