@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 type NewReservation = { id: string; name: string; date: string; time: string; partySize: number };
 
@@ -27,6 +27,8 @@ function playBeep() {
   });
 }
 
+const subscribeNoop = () => () => {};
+
 export default function NewReservationAlert() {
   const getInitialEnabled = (): boolean => {
     if (typeof window === "undefined") return false;
@@ -49,12 +51,9 @@ export default function NewReservationAlert() {
 
   const [enabled, setEnabled] = useState<boolean>(getInitialEnabled);
   const [toasts, setToasts] = useState<NewReservation[]>([]);
-  const [mounted, setMounted] = useState(false);
+  // false during SSR and hydration, true on the client afterwards.
+  const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
   const sinceRef = useRef<string>(getInitialSince());
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const poll = useCallback(async () => {
     try {

@@ -36,7 +36,6 @@ export default function Home() {
 
   useEffect(() => {
     mobileOpenRef.current = mobileOpen;
-    if (mobileOpen) setNavVisible(true);
   }, [mobileOpen]);
 
   const heroBgY = useTransform(scrollY, [0, 1000], ["0%", "30%"]);
@@ -305,7 +304,10 @@ export default function Home() {
           <button
             type="button"
             aria-label="Toggle menu"
-            onClick={() => setMobileOpen((v) => !v)}
+            onClick={() => {
+              setMobileOpen((v) => !v);
+              setNavVisible(true);
+            }}
             className={`md:hidden w-9 h-9 flex flex-col items-center justify-center gap-1.5 border rounded-full ml-2 transition-colors duration-300 ${
               mobileOpen ? "border-amber-500 bg-amber-500/10" : "border-stone-700"
             }`}

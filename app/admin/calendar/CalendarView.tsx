@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { format, addDays, startOfWeek, endOfWeek, isSameDay, isToday, parseISO } from "date-fns";
 import { useLanguage } from "@/lib/languageContext";
@@ -121,7 +121,7 @@ export default function CalendarView({
     CANCELLED: t.admin.cancelled,
   };
 
-  const weekSummary = useMemo(() => {
+  const weekSummary = (() => {
     const inWeek = reservations.filter((r) => {
       const d = parseISO(r.date);
       return d >= weekStart && d <= weekEnd;
@@ -131,7 +131,7 @@ export default function CalendarView({
       confirmed: inWeek.filter((r) => r.status === "CONFIRMED").length,
       pending: inWeek.filter((r) => r.status === "PENDING").length,
     };
-  }, [reservations, weekStart, weekEnd]);
+  })();
 
   return (
     <div className="space-y-6 sm:space-y-8">
