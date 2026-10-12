@@ -2,12 +2,12 @@ import type { NextConfig } from "next";
 
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com https://www.googletagmanager.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com https://www.googletagmanager.com https://cloud.ccm19.de",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cloud.ccm19.de",
   "img-src 'self' data: https: blob: https://images.unsplash.com https://plus.unsplash.com https://lh3.googleusercontent.com https://platform-lookaside.fbsbx.com",
-  "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com",
+  "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://cloud.ccm19.de",
   "frame-src 'self' https://accounts.google.com https://www.facebook.com https://www.google.com https://maps.google.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
+  "font-src 'self' data: https://fonts.gstatic.com https://cloud.ccm19.de",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

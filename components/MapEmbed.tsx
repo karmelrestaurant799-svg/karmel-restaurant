@@ -1,20 +1,20 @@
 "use client";
 import { restaurantInfo } from "@/lib/menuData";
-import { useConsent } from "@/lib/consent";
+import { openConsentSettings, useEmbeddingConsent } from "@/lib/consent";
 import { useLanguage } from "@/lib/languageContext";
 
 export default function MapEmbed() {
-  const { consent, acceptAll } = useConsent();
+  const mapsAllowed = useEmbeddingConsent("Google Maps");
   const { t } = useLanguage();
 
-  if (consent !== "all") {
+  if (!mapsAllowed) {
     return (
       <div className="w-full h-52 sm:h-64 md:h-80 border border-white/10 flex flex-col items-center justify-center gap-4 bg-white/5 text-center px-6">
         <p className="text-stone-400 text-xs sm:text-sm max-w-sm">
           {t.location.map}
         </p>
         <button
-          onClick={acceptAll}
+          onClick={openConsentSettings}
           className="px-5 py-2.5 text-[10px] sm:text-xs uppercase tracking-widest bg-amber-500 text-black font-bold hover:bg-white transition-colors"
         >
           {t.location.map}

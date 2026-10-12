@@ -11,6 +11,7 @@ import MapEmbed from "@/components/MapEmbed";
 import ReservationForm from "@/components/ReservationForm";
 import Logo from "@/components/Logo";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { openConsentSettings } from "@/lib/consent";
 import { useLanguage } from "@/lib/languageContext";
 import { restaurantInfo } from "@/lib/menuData";
 
@@ -627,12 +628,7 @@ export default function Home() {
             <Link href="/datenschutz" className="hover:text-amber-500 transition-colors">{t.footer.privacy}</Link>
             <span className="text-stone-700">|</span>
             <button
-              onClick={() => {
-                if (typeof window !== "undefined") {
-                  localStorage.removeItem("karmel-cookie-consent");
-                  window.location.reload();
-                }
-              }}
+              onClick={openConsentSettings}
               className="hover:text-amber-500 transition-colors bg-transparent p-0"
             >
               {t.footer.cookieSettings}
